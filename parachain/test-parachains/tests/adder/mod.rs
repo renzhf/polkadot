@@ -30,6 +30,10 @@ use parachain::{
 use codec::{Decode, Encode};
 use adder::{HeadData, BlockData, hash_state};
 
+fn hash_head(head: &HeadData) -> [u8; 32] {
+	head.hash()
+}
+
 fn execution_mode() -> ExecutionMode {
 	ExecutionMode::ExternalProcessCustomHost {
 		pool: ValidationPool::new(),
