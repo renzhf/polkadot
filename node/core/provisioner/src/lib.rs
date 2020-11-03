@@ -37,10 +37,10 @@ use polkadot_node_subsystem_util::{
 	request_availability_cores, request_persisted_validation_data, JobTrait, ToJobTrait,
 };
 use polkadot_primitives::v1::{
-	BackedCandidate, BlockNumber, CoreState, Hash, OccupiedCoreAssumption,
+	BackedCandidate, BlockNumber, CandidateReceipt, CoreState, Hash, OccupiedCoreAssumption,
 	SignedAvailabilityBitfield,
 };
-use std::{collections::HashMap, convert::TryFrom, pin::Pin};
+use std::{collections::{HashMap, HashSet}, convert::TryFrom, pin::Pin};
 use thiserror::Error;
 
 struct ProvisioningJob {
@@ -49,6 +49,7 @@ struct ProvisioningJob {
 	receiver: mpsc::Receiver<ToJob>,
 	provisionable_data_channels: Vec<mpsc::Sender<ProvisionableData>>,
 	signed_bitfields: Vec<SignedAvailabilityBitfield>,
+	includable_candidates: HashSet<CandidateReceipt>,
 	metrics: Metrics,
 }
 
@@ -186,6 +187,7 @@ impl ProvisioningJob {
 			receiver,
 			provisionable_data_channels: Vec::new(),
 			signed_bitfields: Vec::new(),
+			includable_candidates: HashSet::new(),
 			metrics,
 		}
 	}
@@ -260,7 +262,10 @@ impl ProvisioningJob {
 			ProvisionableData::Bitfield(_, signed_bitfield) => {
 				self.signed_bitfields.push(signed_bitfield)
 			}
-			_ => {}
+			ProvisionableData::Includable(_, includable_candidate_receipt) => {
+				let _ = self.includable_candidates.insert(includable_candidate_receipt);
+			}
+			ProvisionableData::MisbehaviorReport(..) | ProvisionableData::Dispute(..) => {}
 		}
 	}
 }
