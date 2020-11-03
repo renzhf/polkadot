@@ -27,15 +27,14 @@ use futures::{
 use polkadot_node_subsystem::{
 	errors::{ChainApiError, RuntimeApiError},
 	messages::{
-		AllMessages, ChainApiMessage, ProvisionableData, ProvisionerInherentData,
-		ProvisionerMessage, RuntimeApiMessage,
+		AllMessages, CandidateBackingMessage, ChainApiMessage, ProvisionableData,
+		ProvisionerInherentData, ProvisionerMessage, RuntimeApiMessage,
 	},
 };
 use polkadot_node_subsystem_util::{
-	self as util,
-	delegated_subsystem,
-	request_availability_cores, request_persisted_validation_data, JobTrait, ToJobTrait,
+	self as util, delegated_subsystem,
 	metrics::{self, prometheus},
+	request_availability_cores, request_persisted_validation_data, JobTrait, ToJobTrait,
 };
 use polkadot_primitives::v1::{
 	BackedCandidate, BlockNumber, CoreState, Hash, OccupiedCoreAssumption,
@@ -49,7 +48,6 @@ struct ProvisioningJob {
 	sender: mpsc::Sender<FromJob>,
 	receiver: mpsc::Receiver<ToJob>,
 	provisionable_data_channels: Vec<mpsc::Sender<ProvisionableData>>,
-	backed_candidates: Vec<BackedCandidate>,
 	signed_bitfields: Vec<SignedAvailabilityBitfield>,
 	metrics: Metrics,
 }
@@ -93,6 +91,7 @@ impl From<ProvisionerMessage> for ToJob {
 enum FromJob {
 	ChainApi(ChainApiMessage),
 	Runtime(RuntimeApiMessage),
+	CandidateBacking(CandidateBackingMessage),
 }
 
 impl From<FromJob> for AllMessages {
@@ -100,6 +99,7 @@ impl From<FromJob> for AllMessages {
 		match from_job {
 			FromJob::ChainApi(cam) => AllMessages::ChainApi(cam),
 			FromJob::Runtime(ram) => AllMessages::RuntimeApi(ram),
+			FromJob::CandidateBacking(cbm) => AllMessages::CandidateBacking(cbm),
 		}
 	}
 }
@@ -111,6 +111,9 @@ impl TryFrom<AllMessages> for FromJob {
 		match msg {
 			AllMessages::ChainApi(chain) => Ok(FromJob::ChainApi(chain)),
 			AllMessages::RuntimeApi(runtime) => Ok(FromJob::Runtime(runtime)),
+			AllMessages::CandidateBacking(candidate_backing) => {
+				Ok(FromJob::CandidateBacking(candidate_backing))
+			}
 			_ => Err(()),
 		}
 	}
@@ -132,6 +135,9 @@ enum Error {
 
 	#[error("Failed to send message to ChainAPI")]
 	ChainApiMessageSend(#[source] mpsc::SendError),
+
+	#[error("Failed to send message to Candidate Backing")]
+	CandidateBackingMessageSend(#[source] mpsc::SendError),
 
 	#[error("Failed to send return message with Inherents")]
 	InherentDataReturnChannel,
@@ -179,7 +185,6 @@ impl ProvisioningJob {
 			sender,
 			receiver,
 			provisionable_data_channels: Vec::new(),
-			backed_candidates: Vec::new(),
 			signed_bitfields: Vec::new(),
 			metrics,
 		}
@@ -196,7 +201,6 @@ impl ProvisioningJob {
 					if let Err(err) = send_inherent_data(
 						self.relay_parent,
 						&self.signed_bitfields,
-						&self.backed_candidates,
 						return_sender,
 						self.sender.clone(),
 					)
@@ -256,9 +260,6 @@ impl ProvisioningJob {
 			ProvisionableData::Bitfield(_, signed_bitfield) => {
 				self.signed_bitfields.push(signed_bitfield)
 			}
-			ProvisionableData::BackedCandidate(backed_candidate) => {
-				self.backed_candidates.push(backed_candidate)
-			}
 			_ => {}
 		}
 	}
@@ -286,7 +287,6 @@ type CoreAvailability = BitVec<bitvec::order::Lsb0, u8>;
 async fn send_inherent_data(
 	relay_parent: Hash,
 	bitfields: &[SignedAvailabilityBitfield],
-	candidates: &[BackedCandidate],
 	return_sender: oneshot::Sender<ProvisionerInherentData>,
 	mut from_job: mpsc::Sender<FromJob>,
 ) -> Result<(), Error> {
@@ -294,15 +294,28 @@ async fn send_inherent_data(
 		.await?
 		.await??;
 
+	let candidates: Vec<BackedCandidate> = {
+		let (tx, rx) = oneshot::channel();
+		sender
+			.send(FromJob::CandidateBacking(
+				CandidateBackingMessage::GetBackedCandidates(relay_parent, tx),
+			))
+			.await
+			.map_err(|err| Error::CandidateBackingMessageSend(err))?;
+		rx.await?
+			.into_iter()
+			.map(|new_backed_candidate| new_backed_candidate.0)
+			.collect()
+	};
+
 	let bitfields = select_availability_bitfields(&availability_cores, bitfields);
 	let candidates = select_candidates(
 		&availability_cores,
 		&bitfields,
-		candidates,
+		&candidates,
 		relay_parent,
 		&mut from_job,
-	)
-	.await?;
+	).await?;
 
 	return_sender
 		.send((bitfields, candidates))
@@ -481,8 +494,14 @@ impl Metrics {
 	fn on_inherent_data_request(&self, response: Result<(), ()>) {
 		if let Some(metrics) = &self.0 {
 			match response {
-				Ok(()) => metrics.inherent_data_requests.with_label_values(&["succeeded"]).inc(),
-				Err(()) => metrics.inherent_data_requests.with_label_values(&["failed"]).inc(),
+				Ok(()) => metrics
+					.inherent_data_requests
+					.with_label_values(&["succeeded"])
+					.inc(),
+				Err(()) => metrics
+					.inherent_data_requests
+					.with_label_values(&["failed"])
+					.inc(),
 			}
 		}
 	}
@@ -505,7 +524,6 @@ impl metrics::Metrics for Metrics {
 		Ok(Metrics(Some(metrics)))
 	}
 }
-
 
 delegated_subsystem!(ProvisioningJob((), Metrics) <- ToJob as ProvisioningSubsystem);
 

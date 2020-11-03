@@ -499,8 +499,6 @@ impl StatementDistributionMessage {
 pub enum ProvisionableData {
 	/// This bitfield indicates the availability of various candidate blocks.
 	Bitfield(Hash, SignedAvailabilityBitfield),
-	/// The Candidate Backing subsystem believes that this candidate is valid, pending availability.
-	BackedCandidate(BackedCandidate),
 	/// Misbehavior reports are self-contained proofs of validator misbehavior.
 	MisbehaviorReport(Hash, MisbehaviorReport),
 	/// Disputes trigger a broad dispute resolution process.
