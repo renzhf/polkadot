@@ -296,7 +296,7 @@ async fn send_inherent_data(
 
 	let candidates: Vec<BackedCandidate> = {
 		let (tx, rx) = oneshot::channel();
-		sender
+		from_job
 			.send(FromJob::CandidateBacking(
 				CandidateBackingMessage::GetBackedCandidates(relay_parent, tx),
 			))
