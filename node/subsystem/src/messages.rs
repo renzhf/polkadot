@@ -499,10 +499,24 @@ impl StatementDistributionMessage {
 pub enum ProvisionableData {
 	/// This bitfield indicates the availability of various candidate blocks.
 	Bitfield(Hash, SignedAvailabilityBitfield),
+	/// This candidate receipt is includable
+	Includable(Hash, CandidateReceipt),
 	/// Misbehavior reports are self-contained proofs of validator misbehavior.
 	MisbehaviorReport(Hash, MisbehaviorReport),
 	/// Disputes trigger a broad dispute resolution process.
 	Dispute(Hash, ValidatorSignature),
+}
+
+impl ProvisionableData {
+	/// If the current variant contains the relay parent hash, return it.
+	pub fn relay_parent(&self) -> Option<Hash> {
+		match self {
+			Self::Bitfield(hash, ..) => Some(*hash),
+			Self::Includable(hash, ..) => Some(*hash),
+			Self::MisbehaviorReport(hash, ..) => Some(*hash),
+			Self::Dispute(hash, ..) => Some(*hash),
+		}
+	}
 }
 
 /// This data needs to make its way from the provisioner into the InherentData.
@@ -534,7 +548,7 @@ impl ProvisionerMessage {
 		match self {
 			Self::RequestBlockAuthorshipData(hash, _) => Some(*hash),
 			Self::RequestInherentData(hash, _) => Some(*hash),
-			Self::ProvisionableData(_) => None,
+			Self::ProvisionableData(pd) => pd.relay_parent(),
 		}
 	}
 }

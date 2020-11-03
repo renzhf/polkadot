@@ -104,9 +104,6 @@ struct CandidateBackingJob {
 	issued_statements: HashSet<Hash>,
 	/// `Some(h)` if this job has already issues `Seconded` statemt for some candidate with `h` hash.
 	seconded: Option<Hash>,
-	/// The candidates that are includable, by hash. Each entry here indicates
-	/// that we've sent the provisioner the backed candidate.
-	backed: HashSet<Hash>,
 	/// We have already reported misbehaviors for these validators.
 	reported_misbehavior_for: HashSet<ValidatorIndex>,
 	keystore: SyncCryptoStorePtr,
@@ -452,18 +449,12 @@ impl CandidateBackingJob {
 				&summary.candidate,
 				&self.table_context,
 			) {
-				// `HashSet::insert` returns true if the thing wasn't in there already.
-				// one of the few places the Rust-std folks did a bad job with API
-				if self.backed.insert(summary.candidate) {
-					if let Some(backed) =
-						table_attested_to_backed(attested, &self.table_context)
-					{
-						let message = ProvisionerMessage::ProvisionableData(
-							ProvisionableData::BackedCandidate(backed),
-						);
-						self.send_to_provisioner(message).await?;
-					}
-				}
+				// candidate exists and is includable, per the `attested_candidate` contract
+				// therefore, let the provisioner know about it
+				let message = ProvisionerMessage::ProvisionableData(
+					ProvisionableData::Includable(self.parent, attested.candidate.to_plain()),
+				);
+				self.send_to_provisioner(message).await?;
 			}
 		}
 
@@ -849,7 +840,6 @@ impl util::JobTrait for CandidateBackingJob {
 				required_collator,
 				issued_statements: HashSet::new(),
 				seconded: None,
-				backed: HashSet::new(),
 				reported_misbehavior_for: HashSet::new(),
 				keystore,
 				table: Table::default(),
