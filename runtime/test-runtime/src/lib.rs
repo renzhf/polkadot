@@ -29,7 +29,9 @@ use polkadot_runtime_parachains::{
 	inclusion,
 	initializer,
 	paras,
-	router,
+	dmp,
+	ump,
+	hrmp,
 	runtime_api_impl::v1 as runtime_impl,
 	scheduler,
 };
@@ -454,9 +456,14 @@ impl paras::Trait for Runtime {
 	type Origin = Origin;
 }
 
-impl router::Trait for Runtime {
-	type Origin = Origin;
+impl dmp::Trait for Runtime {}
+
+impl ump::Trait for Runtime {
 	type UmpSink = ();
+}
+
+impl hrmp::Trait for Runtime {
+	type Origin = Origin;
 }
 
 impl scheduler::Trait for Runtime {}
